@@ -56,6 +56,10 @@ android {
         sourceCompatibility JavaVersion.VERSION_1_8
         targetCompatibility JavaVersion.VERSION_1_8
     }
+
+    testOptions {
+        unitTests.includeAndroidResources = true
+    }
 }
 
 // Configure the Kotlin JVM target. The compilerOptions DSL requires KGP 1.9+ or
@@ -79,4 +83,6 @@ dependencies {
     implementation 'com.github.davidliu:audioswitch:039a35aefab7747c557242fa216c9ea11743b604'
     implementation 'androidx.annotation:annotation:1.1.0'
     testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.robolectric:robolectric:4.16.1'
+    testImplementation 'org.mockito:mockito-core:4.11.0'
 }

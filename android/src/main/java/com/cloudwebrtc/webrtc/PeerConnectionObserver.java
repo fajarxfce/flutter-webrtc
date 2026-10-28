@@ -1,5 +1,7 @@
 package com.cloudwebrtc.webrtc;
 
+import android.os.Handler;
+import android.os.Looper;
 import android.util.Log;
 
 import androidx.annotation.Nullable;
@@ -64,6 +66,9 @@ class PeerConnectionObserver implements PeerConnection.Observer, EventChannel.St
   private final StateProvider stateProvider;
   private final EventChannel eventChannel;
   private EventChannel.EventSink eventSink;
+  private final Handler trackEventHandler = new Handler(Looper.getMainLooper());
+  // Read and written only on the platform thread.
+  private boolean closed;
 
   PeerConnectionObserver(PeerConnection.RTCConfiguration configuration, StateProvider stateProvider, BinaryMessenger messenger, String id) {
     this.configuration = configuration;
@@ -104,6 +109,8 @@ class PeerConnectionObserver implements PeerConnection.Observer, EventChannel.St
   }
 
   void close() {
+    closed = true;
+    trackEventHandler.removeCallbacksAndMessages(null);
     peerConnection.close();
     remoteStreams.clear();
     remoteTracks.clear();
@@ -552,20 +559,30 @@ class PeerConnectionObserver implements PeerConnection.Observer, EventChannel.St
     params.putMap("track", mediaTrackToMap(receiver.track()));
     params.putMap("receiver", rtpReceiverToMap(receiver));
 
-    if (this.configuration.sdpSemantics == PeerConnection.SdpSemantics.UNIFIED_PLAN) {
-      List<RtpTransceiver> transceivers = peerConnection.getTransceivers();
-      for (RtpTransceiver transceiver : transceivers) {
-        if (transceiver.getReceiver() != null && receiver.id().equals(transceiver.getReceiver().id())) {
-          String transceiverId = transceiver.getMid();
-          if (null == transceiverId) {
-            transceiverId = stateProvider.getNextStreamUUID();
-            this.transceivers.put(transceiverId,transceiver);
+    // Snapshot callback-owned objects before returning to native WebRTC. Only
+    // access PeerConnection's transceiver wrappers on the platform thread:
+    // getTransceivers() disposes its previous wrappers and races with Flutter
+    // method calls if invoked here on the signaling thread.
+    final String receiverId = receiver.id();
+    trackEventHandler.post(() -> {
+      if (closed) {
+        return;
+      }
+      if (this.configuration.sdpSemantics == PeerConnection.SdpSemantics.UNIFIED_PLAN) {
+        List<RtpTransceiver> transceivers = peerConnection.getTransceivers();
+        for (RtpTransceiver transceiver : transceivers) {
+          if (transceiver.getReceiver() != null && receiverId.equals(transceiver.getReceiver().id())) {
+            String transceiverId = transceiver.getMid();
+            if (null == transceiverId) {
+              transceiverId = stateProvider.getNextStreamUUID();
+              this.transceivers.put(transceiverId,transceiver);
+            }
+            params.putMap("transceiver", transceiverToMap(transceiverId, transceiver));
           }
-          params.putMap("transceiver", transceiverToMap(transceiverId, transceiver));
         }
       }
-    }
-    sendEvent(params);
+      sendEvent(params);
+    });
   }
 
   @Override
